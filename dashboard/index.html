@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>AI Vision Classroom</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div class="container">
+
+        <header>
+            <h1>AI Vision Classroom</h1>
+            <p>Teacher Dashboard</p>
+        </header>
+
+        <section class="summary">
+            <div class="summary-card">
+                <h3>Active Students</h3>
+                <p id="activeStudents">0</p>
+            </div>
+
+            <div class="summary-card">
+                <h3>Raised Hands</h3>
+                <p id="raisedHands">0</p>
+            </div>
+
+            <div class="summary-card">
+                <h3>Total Events</h3>
+                <p id="totalEvents">0</p>
+            </div>
+        </section>
+
+        <section class="students-section">
+
+            <h2>Student Activity</h2>
+
+            <table>
+
+                <thead>
+                    <tr>
+                        <th>Student</th>
+                        <th>Event</th>
+                        <th>Value</th>
+                        <th>Timestamp</th>
+                    </tr>
+                </thead>
+
+                <tbody id="eventTable">
+                    <tr>
+                        <td colspan="4">No events received yet.</td>
+                    </tr>
+                </tbody>
+
+            </table>
+
+        </section>
+
+    </div>
+
+    <script src="script.js"></script>
+
+</body>
+</html>
