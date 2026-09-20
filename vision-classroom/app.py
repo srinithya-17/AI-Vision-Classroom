@@ -4,6 +4,7 @@ import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 
 import mediapipe as mp
+import cv2
 
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -17,6 +18,8 @@ from gestures.hand_raise_smoother import HandRaiseSmoother
 from vision.pose_tracker import PoseTracker
 
 from events.event_store import save_event, get_latest_event
+
+from physics_engine import PhysicsEngine
 
 
 # ============================================================
@@ -80,6 +83,7 @@ if not os.path.exists(POSE_MODEL_PATH):
 # ============================================================
 
 if "student_name" not in st.session_state:
+
     st.session_state.student_name = ""
 
 
@@ -159,7 +163,7 @@ else:
 # SYSTEM STATUS
 # ============================================================
 
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 
 with col1:
@@ -185,11 +189,29 @@ with col3:
         "Active"
     )
 
+
 with col4:
-    st.metric("Hand Tracking", "Active")
+
+    st.metric(
+        "Hand Tracking",
+        "Active"
+    )
+
 
 with col5:
-    st.metric("Pose Tracking", "Active")
+
+    st.metric(
+        "Pose Tracking",
+        "Active"
+    )
+
+
+with col6:
+
+    st.metric(
+        "Physics Engine",
+        "Active"
+    )
 
 
 st.divider()
@@ -241,6 +263,20 @@ class VisionProcessor(VideoProcessorBase):
         self.pose_tracker = PoseTracker(
             POSE_MODEL_PATH
         )
+
+
+        # ----------------------------------------------------
+        # PHYSICS ENGINE
+        # ----------------------------------------------------
+
+        self.physics_engine = PhysicsEngine()
+
+        self.physics_result = {
+            "elbow_angle": 0.0,
+            "knee_angle": 0.0,
+            "velocity": 0.0,
+            "acceleration": 0.0
+        }
 
 
         # ----------------------------------------------------
@@ -322,6 +358,28 @@ class VisionProcessor(VideoProcessorBase):
         )
 
 
+        # ====================================================
+        # PHYSICS PROCESSING
+        # ====================================================
+
+        if pose_result.pose_landmarks:
+
+            pose_landmarks = (
+                pose_result.pose_landmarks[0]
+            )
+
+            timestamp = (
+                self.frame_timestamp_ms / 1000.0
+            )
+
+            self.physics_result = (
+                self.physics_engine.process_landmarks(
+                    pose_landmarks,
+                    timestamp
+                )
+            )
+
+
         # ----------------------------------------------------
         # UPDATE TIMESTAMP
         # ----------------------------------------------------
@@ -334,6 +392,7 @@ class VisionProcessor(VideoProcessorBase):
         # ====================================================
 
         gesture = "UNKNOWN"
+
         gesture_confidence = 0.0
 
 
@@ -343,8 +402,10 @@ class VisionProcessor(VideoProcessorBase):
                 hand_result.hand_landmarks[0]
             )
 
-            gesture, gesture_confidence = classify_gesture_with_confidence(
-                first_hand
+            gesture, gesture_confidence = (
+                classify_gesture_with_confidence(
+                    first_hand
+                )
             )
 
 
@@ -376,8 +437,16 @@ class VisionProcessor(VideoProcessorBase):
             )
 
             hand_label = None
-            if hand_result.handedness and hand_result.handedness[0]:
-                hand_label = hand_result.handedness[0][0]
+
+            if (
+                hand_result.handedness
+                and hand_result.handedness[0]
+            ):
+
+                hand_label = (
+                    hand_result.handedness[0][0]
+                )
+
 
             raw_hand_raised = is_hand_raised(
                 first_hand,
@@ -405,8 +474,7 @@ class VisionProcessor(VideoProcessorBase):
             save_event(
                 self.student_name,
                 "HAND_RAISED",
-                True,
-                self.hand_raise_smoother.stability()
+                True
             )
 
 
@@ -418,31 +486,38 @@ class VisionProcessor(VideoProcessorBase):
             save_event(
                 self.student_name,
                 "HAND_DOWN",
-                False,
-                self.hand_raise_smoother.stability()
+                False
             )
 
 
-        # Update previous state
+        # ----------------------------------------------------
+        # UPDATE PREVIOUS HAND STATE
+        # ----------------------------------------------------
 
         self.previous_hand_raised = (
             self.hand_raised
         )
 
-        # A gesture event is written only after smoothing changes the stable
-        # gesture, so the event file is not rewritten on every video frame.
+
+        # ====================================================
+        # GESTURE EVENT
+        # ====================================================
+
         if (
             self.current_gesture != self.previous_gesture
             and self.current_gesture != "UNKNOWN"
         ):
+
             save_event(
                 self.student_name,
                 "GESTURE_DETECTED",
-                self.current_gesture,
-                self.gesture_smoother.stability() * gesture_confidence
+                self.current_gesture
             )
 
-        self.previous_gesture = self.current_gesture
+
+        self.previous_gesture = (
+            self.current_gesture
+        )
 
 
         # ====================================================
@@ -451,12 +526,10 @@ class VisionProcessor(VideoProcessorBase):
 
         output = image.copy()
 
-        import cv2
 
-
-        # ----------------------------------------------------
+        # ====================================================
         # DRAW HAND LANDMARKS
-        # ----------------------------------------------------
+        # ====================================================
 
         if hand_result.hand_landmarks:
 
@@ -488,94 +561,364 @@ class VisionProcessor(VideoProcessorBase):
                             -1
                         )
 
+
+                # ------------------------------------------------
+                # HAND CONNECTIONS
+                # ------------------------------------------------
+
                 for start, end in [
-                    (0, 1), (1, 2), (2, 3), (3, 4),
-                    (0, 5), (5, 6), (6, 7), (7, 8),
-                    (5, 9), (9, 10), (10, 11), (11, 12),
-                    (9, 13), (13, 14), (14, 15), (15, 16),
-                    (13, 17), (17, 18), (18, 19), (19, 20),
+
+                    (0, 1),
+                    (1, 2),
+                    (2, 3),
+                    (3, 4),
+
+                    (0, 5),
+                    (5, 6),
+                    (6, 7),
+                    (7, 8),
+
+                    (5, 9),
+                    (9, 10),
+                    (10, 11),
+                    (11, 12),
+
+                    (9, 13),
+                    (13, 14),
+                    (14, 15),
+                    (15, 16),
+
+                    (13, 17),
+                    (17, 18),
+                    (18, 19),
+                    (19, 20),
+
                     (0, 17)
+
                 ]:
+
                     start_point = hand[start]
                     end_point = hand[end]
+
                     cv2.line(
                         output,
-                        (int(start_point.x * output.shape[1]), int(start_point.y * output.shape[0])),
-                        (int(end_point.x * output.shape[1]), int(end_point.y * output.shape[0])),
+
+                        (
+                            int(
+                                start_point.x
+                                * output.shape[1]
+                            ),
+                            int(
+                                start_point.y
+                                * output.shape[0]
+                            )
+                        ),
+
+                        (
+                            int(
+                                end_point.x
+                                * output.shape[1]
+                            ),
+                            int(
+                                end_point.y
+                                * output.shape[0]
+                            )
+                        ),
+
                         (0, 180, 0),
+
                         2
                     )
 
+
+        # ====================================================
+        # DRAW POSE LANDMARKS
+        # ====================================================
+
         if pose_result.pose_landmarks:
-            pose = pose_result.pose_landmarks[0]
-            for start, end in [(11, 13), (13, 15), (12, 14), (14, 16), (11, 12)]:
+
+            pose = (
+                pose_result.pose_landmarks[0]
+            )
+
+
+            # ------------------------------------------------
+            # Upper body connections
+            # ------------------------------------------------
+
+            for start, end in [
+
+                (11, 13),
+                (13, 15),
+
+                (12, 14),
+                (14, 16),
+
+                (11, 12)
+
+            ]:
+
                 cv2.line(
+
                     output,
-                    (int(pose[start].x * output.shape[1]), int(pose[start].y * output.shape[0])),
-                    (int(pose[end].x * output.shape[1]), int(pose[end].y * output.shape[0])),
+
+                    (
+                        int(
+                            pose[start].x
+                            * output.shape[1]
+                        ),
+                        int(
+                            pose[start].y
+                            * output.shape[0]
+                        )
+                    ),
+
+                    (
+                        int(
+                            pose[end].x
+                            * output.shape[1]
+                        ),
+                        int(
+                            pose[end].y
+                            * output.shape[0]
+                        )
+                    ),
+
                     (230, 120, 40),
+
                     2
                 )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # DISPLAY STUDENT NAME
-        # ----------------------------------------------------
+        # ====================================================
 
         cv2.putText(
+
             output,
+
             f"Student: {self.student_name}",
+
             (20, 40),
+
             cv2.FONT_HERSHEY_SIMPLEX,
+
             0.8,
+
             (255, 255, 255),
+
             2
         )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # DISPLAY GESTURE
-        # ----------------------------------------------------
+        # ====================================================
 
         cv2.putText(
+
             output,
+
             f"Gesture: {self.current_gesture}",
+
             (20, 80),
+
             cv2.FONT_HERSHEY_SIMPLEX,
+
             0.8,
+
             (255, 255, 255),
+
             2
         )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # DISPLAY HAND STATUS
-        # ----------------------------------------------------
+        # ====================================================
 
         cv2.putText(
+
             output,
+
             f"Hand Raised: {self.hand_raised}",
+
             (20, 120),
+
             cv2.FONT_HERSHEY_SIMPLEX,
+
             0.8,
+
             (255, 255, 255),
+
             2
         )
+
+
+        # ====================================================
+        # DISPLAY GESTURE STABILITY
+        # ====================================================
 
         cv2.putText(
+
             output,
-            f"Gesture Stability: {self.gesture_smoother.stability() * 100:.0f}%",
+
+            (
+                "Gesture Stability: "
+                f"{self.gesture_smoother.stability() * 100:.0f}%"
+            ),
+
             (20, 160),
+
             cv2.FONT_HERSHEY_SIMPLEX,
+
             0.7,
+
             (255, 220, 0),
+
+            2
+        )
+
+
+        # ====================================================
+        # PHYSICS DISPLAY
+        # ====================================================
+
+        elbow_angle = self.physics_result.get(
+            "elbow_angle",
+            0.0
+        )
+
+        knee_angle = self.physics_result.get(
+            "knee_angle",
+            0.0
+        )
+
+        velocity = self.physics_result.get(
+            "velocity",
+            0.0
+        )
+
+        acceleration = self.physics_result.get(
+            "acceleration",
+            0.0
+        )
+
+
+        # ----------------------------------------------------
+        # Physics title
+        # ----------------------------------------------------
+
+        cv2.putText(
+
+            output,
+
+            "PHYSICS",
+
+            (20, 215),
+
+            cv2.FONT_HERSHEY_SIMPLEX,
+
+            0.75,
+
+            (255, 255, 255),
+
             2
         )
 
 
         # ----------------------------------------------------
-        # RETURN FRAME
+        # Elbow angle
         # ----------------------------------------------------
+
+        cv2.putText(
+
+            output,
+
+            f"Elbow Angle: {elbow_angle:.1f} deg",
+
+            (20, 250),
+
+            cv2.FONT_HERSHEY_SIMPLEX,
+
+            0.65,
+
+            (255, 255, 255),
+
+            2
+        )
+
+
+        # ----------------------------------------------------
+        # Knee angle
+        # ----------------------------------------------------
+
+        cv2.putText(
+
+            output,
+
+            f"Knee Angle: {knee_angle:.1f} deg",
+
+            (20, 285),
+
+            cv2.FONT_HERSHEY_SIMPLEX,
+
+            0.65,
+
+            (255, 255, 255),
+
+            2
+        )
+
+
+        # ----------------------------------------------------
+        # Velocity
+        # ----------------------------------------------------
+
+        cv2.putText(
+
+            output,
+
+            f"Velocity: {velocity:.3f}",
+
+            (20, 320),
+
+            cv2.FONT_HERSHEY_SIMPLEX,
+
+            0.65,
+
+            (255, 255, 255),
+
+            2
+        )
+
+
+        # ----------------------------------------------------
+        # Acceleration
+        # ----------------------------------------------------
+
+        cv2.putText(
+
+            output,
+
+            f"Acceleration: {acceleration:.3f}",
+
+            (20, 355),
+
+            cv2.FONT_HERSHEY_SIMPLEX,
+
+            0.65,
+
+            (255, 255, 255),
+
+            2
+        )
+
+
+        # ====================================================
+        # RETURN FRAME
+        # ====================================================
 
         from av import VideoFrame
 
@@ -619,7 +962,8 @@ st.subheader(
 
 st.write(
     "Allow camera access to enable "
-    "AI classroom interaction."
+    "AI classroom interaction and "
+    "real-time physics tracking."
 )
 
 
@@ -633,8 +977,7 @@ if not student_name.strip():
 else:
 
     # --------------------------------------------------------
-    # IMPORTANT:
-    # Pass the student's name into VisionProcessor.
+    # Pass student name into VisionProcessor
     # --------------------------------------------------------
 
     def create_processor():
@@ -645,6 +988,7 @@ else:
 
 
     webrtc_streamer(
+
         key="vision-classroom",
 
         video_processor_factory=(
@@ -786,6 +1130,37 @@ with col2:
 
 
 # ============================================================
+# PHYSICS LEARNING
+# ============================================================
+
+st.divider()
+
+st.subheader(
+    "⚛️ Real-Time Physics Tracking"
+)
+
+st.write(
+    "The MediaPipe pose landmarks are connected "
+    "to the Physics Engine to calculate:"
+)
+
+st.write(
+    """
+- 📐 Elbow angle
+- 🦵 Knee angle
+- 🏃 Wrist movement velocity
+- ⚡ Wrist acceleration
+"""
+)
+
+st.info(
+    "Velocity and acceleration currently use "
+    "MediaPipe normalized image coordinates. "
+    "They are not calibrated to meters/second yet."
+)
+
+
+# ============================================================
 # ARCHITECTURE
 # ============================================================
 
@@ -815,6 +1190,16 @@ Student Browser
               +---- Gesture Recognition
               |
               +---- Hand-Raised Detection
+              |
+              +---- Physics Engine
+              |       |
+              |       +---- Elbow Angle
+              |       |
+              |       +---- Knee Angle
+              |       |
+              |       +---- Velocity
+              |       |
+              |       +---- Acceleration
               |
               v
        Student-Specific Event
