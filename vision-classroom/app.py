@@ -63,6 +63,21 @@ def send_physics_update(student_name, physics_update):
         print(f"Physics update failed: {error}")
 
 
+def update_classroom_hand_state(student_name, action):
+    """Handle an explicit student hand-state action without affecting vision."""
+    try:
+        response = requests.post(
+            f"{BACKEND_URL}/classroom/hand/{student_name}/{action}",
+            timeout=2,
+        )
+        response.raise_for_status()
+        return True
+
+    except requests.RequestException as error:
+        st.error(f"Could not update hand status: {error}")
+        return False
+
+
 # ============================================================
 # PAGE CONFIGURATION
 # ============================================================
@@ -207,9 +222,16 @@ st.title(
     "🎓 Vision-Based Interactive Classroom"
 )
 
+st.header("Student Portal")
+
 st.write(
     "AI-powered classroom interaction using "
     "MediaPipe hand and pose tracking."
+)
+
+st.caption(
+    "Google Meet is the communication layer. AI Vision powers classroom "
+    "interaction, while Physics Lab analyzes live pose landmarks."
 )
 
 
@@ -265,6 +287,75 @@ with col4:
 
 with col5:
     st.metric("Pose Tracking", "Active")
+
+
+st.divider()
+
+
+# ============================================================
+# CLASSROOM OVERVIEW
+# ============================================================
+
+st.subheader("Classroom Overview")
+
+
+@st.fragment(run_every="1s")
+def show_classroom_overview():
+
+    if not student_name.strip():
+        st.info("Enter your name and join the classroom to see live classroom status.")
+        return
+
+    try:
+        response = requests.get(f"{BACKEND_URL}/classroom/state", timeout=2)
+        response.raise_for_status()
+        state = response.json()
+
+    except requests.RequestException:
+        st.info("Classroom status is waiting for the FastAPI backend.")
+        return
+
+    students = state.get("students", [])
+    raised_hands = state.get("raised_hands", [])
+    gesture = state.get("recent_gestures", {}).get(student_name, {})
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Participants", len(students))
+    col2.metric("Your Hand", "Raised" if student_name in raised_hands else "Down")
+    col3.metric("Latest Gesture", gesture.get("gesture", "Waiting"))
+    col4.metric(
+        "Physics Lab",
+        "Active" if state.get("physics_lab_active") else "Available",
+    )
+
+    st.markdown("#### Teacher Presentation")
+    st.write(
+        f"Shared presentation state: slide {state.get('current_slide', 1)} "
+        f"of {state.get('total_slides', 1)}."
+    )
+    st.caption(
+        "Presentation content is controlled by the teacher; this portal shows "
+        "the shared classroom position."
+    )
+
+    st.markdown("#### Raise Hand")
+    raise_col, clear_col = st.columns(2)
+    with raise_col:
+        if st.button("Raise Hand", key="manual_raise_hand"):
+            if update_classroom_hand_state(student_name, "raise"):
+                st.success("Your hand is marked as raised.")
+    with clear_col:
+        if st.button("Lower Hand", key="manual_clear_hand"):
+            if update_classroom_hand_state(student_name, "clear"):
+                st.success("Your hand is marked as down.")
+
+    st.caption(
+        "You can also raise or lower your hand naturally in view of the camera. "
+        "Vision events remain transition-based."
+    )
+
+
+show_classroom_overview()
 
 
 st.divider()
@@ -892,6 +983,11 @@ st.divider()
 
 st.subheader("Physics Lab")
 
+st.caption(
+    "Current measurements are derived from MediaPipe image coordinates and "
+    "are not calibrated to real-world SI units."
+)
+
 
 @st.fragment(run_every="1s")
 def show_physics_lab():
@@ -924,8 +1020,11 @@ def show_physics_lab():
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Elbow Angle", f"{physics.get('elbow_angle', 0):.1f}°")
     col2.metric("Knee Angle", f"{physics.get('knee_angle', 0):.1f}°")
-    col3.metric("Velocity", f"{physics.get('velocity', 0):.3f}")
-    col4.metric("Acceleration", f"{physics.get('acceleration', 0):.3f}")
+    col3.metric("Velocity (image units/s)", f"{physics.get('velocity', 0):.3f}")
+    col4.metric(
+        "Acceleration (image units/s²)",
+        f"{physics.get('acceleration', 0):.3f}",
+    )
 
 
 show_physics_lab()

@@ -14,8 +14,14 @@
     <div class="container">
 
         <header>
-            <h1>AI Vision Classroom</h1>
-            <p>Teacher Dashboard</p>
+            <div>
+                <p class="eyebrow">Teacher Portal</p>
+                <h1>AI Virtual Classroom</h1>
+                <p>Monitor participants, AI classroom interactions, and Physics Lab activity.</p>
+            </div>
+            <div class="connection-status" id="connectionStatus">
+                Connecting to classroom state…
+            </div>
         </header>
 
         <section class="summary">
@@ -42,7 +48,15 @@
 
         <section class="students-section">
 
-            <h2>Classroom State</h2>
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Participants & AI Monitoring</p>
+                    <h2>Live Classroom State</h2>
+                </div>
+                <p class="section-note">
+                    Physics values use MediaPipe image coordinates and are not SI-calibrated.
+                </p>
+            </div>
 
             <table>
 
@@ -70,7 +84,13 @@
 
         <section class="students-section">
 
-            <h2>Recent Events</h2>
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Recent Activity</p>
+                    <h2>Recent Classroom Events</h2>
+                </div>
+                <p class="section-note" id="lastUpdated">Waiting for updates…</p>
+            </div>
 
             <table>
 

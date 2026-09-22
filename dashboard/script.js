@@ -41,10 +41,12 @@ async function loadClassroomState() {
 
         updateClassroomSummary(state);
         displayStudentState(state);
+        setConnectionStatus(true);
 
     } catch (error) {
 
         console.error("Classroom state error:", error);
+        setConnectionStatus(false);
 
     }
 }
@@ -80,12 +82,16 @@ function displayEvents(events) {
 
         const row = document.createElement("tr");
 
-        row.innerHTML = `
-            <td>${event.student}</td>
-            <td>${event.event_type}</td>
-            <td>${event.value}</td>
-            <td>${event.timestamp}</td>
-        `;
+        [
+            event.student,
+            event.event_type,
+            event.value,
+            event.timestamp,
+        ].forEach(value => {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            row.appendChild(cell);
+        });
 
         table.appendChild(row);
 
@@ -157,6 +163,23 @@ function displayStudentState(state) {
 function formatNumber(value, digits) {
 
     return typeof value === "number" ? value.toFixed(digits) : "—";
+}
+
+
+function setConnectionStatus(isConnected) {
+
+    const status = document.getElementById("connectionStatus");
+    const lastUpdated = document.getElementById("lastUpdated");
+
+    status.textContent = isConnected
+        ? "Live classroom state connected"
+        : "Classroom state unavailable";
+    status.classList.toggle("is-offline", !isConnected);
+
+    if (isConnected) {
+        lastUpdated.textContent =
+            `Updated ${new Date().toLocaleTimeString()}`;
+    }
 }
 
 
