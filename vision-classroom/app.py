@@ -302,8 +302,8 @@ st.subheader("Classroom Overview")
 @st.fragment(run_every="1s")
 def show_classroom_overview():
 
-    if not student_name.strip():
-        st.info("Enter your name and join the classroom to see live classroom status.")
+    if not student_name.strip() or not st.session_state.student_joined:
+        st.info("Enter your name and use Join Classroom to see live classroom status.")
         return
 
     try:
@@ -865,6 +865,12 @@ if not student_name.strip():
     st.info(
         "Enter your student name before "
         "starting the camera."
+    )
+
+elif not st.session_state.student_joined:
+
+    st.info(
+        "Use Join Classroom before starting the camera."
     )
 
 else:

@@ -50,7 +50,19 @@ def home():
 def receive_event(event: ClassroomEvent):
     add_event(event)
 
-    if event.event_type == "GESTURE_DETECTED":
+    if event.event_type == "HAND_RAISED":
+        classroom_state_manager.raise_hand(
+            DEFAULT_CLASSROOM_SESSION_ID,
+            event.student,
+        )
+
+    elif event.event_type == "HAND_DOWN":
+        classroom_state_manager.dismiss_raised_hand(
+            DEFAULT_CLASSROOM_SESSION_ID,
+            event.student,
+        )
+
+    elif event.event_type == "GESTURE_DETECTED":
         classroom_state_manager.update_gesture(
             DEFAULT_CLASSROOM_SESSION_ID,
             event.student,
