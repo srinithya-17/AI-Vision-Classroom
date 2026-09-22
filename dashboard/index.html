@@ -33,11 +33,44 @@
                 <h3>Total Events</h3>
                 <p id="totalEvents">0</p>
             </div>
+
+            <div class="summary-card">
+                <h3>Physics Lab</h3>
+                <p id="physicsLabStatus">Inactive</p>
+            </div>
         </section>
 
         <section class="students-section">
 
-            <h2>Student Activity</h2>
+            <h2>Classroom State</h2>
+
+            <table>
+
+                <thead>
+                    <tr>
+                        <th>Student</th>
+                        <th>Hand Status</th>
+                        <th>Latest Gesture</th>
+                        <th>Elbow Angle</th>
+                        <th>Knee Angle</th>
+                        <th>Velocity</th>
+                        <th>Acceleration</th>
+                    </tr>
+                </thead>
+
+                <tbody id="studentStateTable">
+                    <tr>
+                        <td colspan="7">No students have joined yet.</td>
+                    </tr>
+                </tbody>
+
+            </table>
+
+        </section>
+
+        <section class="students-section">
+
+            <h2>Recent Events</h2>
 
             <table>
 

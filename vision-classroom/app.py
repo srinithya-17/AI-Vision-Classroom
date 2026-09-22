@@ -1,4 +1,10 @@
 import os
+import re
+import time
+from datetime import datetime
+from urllib.parse import urlparse
+
+import requests
 import streamlit as st
 
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
@@ -15,8 +21,46 @@ from gestures.hand_raised_pose import is_hand_raised
 from gestures.hand_raise_smoother import HandRaiseSmoother
 
 from vision.pose_tracker import PoseTracker
+from physics_engine import PhysicsEngine
 
 from events.event_store import save_event, get_latest_event
+
+
+BACKEND_URL = "http://127.0.0.1:8000"
+PHYSICS_UPDATE_INTERVAL_SECONDS = 0.2
+
+
+def normalize_google_meet_url(meet_link):
+    """Return a safe Google Meet URL, accepting a scheme-less meeting code."""
+    candidate = meet_link.strip()
+    if not candidate:
+        return None
+
+    if not candidate.startswith(("http://", "https://")):
+        candidate = f"https://{candidate}"
+
+    parsed = urlparse(candidate)
+    meeting_code = parsed.path.strip("/")
+    valid_code = re.fullmatch(r"[a-z]{3}-[a-z]{4}-[a-z]{3}", meeting_code)
+
+    if parsed.scheme != "https" or parsed.netloc != "meet.google.com" or not valid_code:
+        return None
+
+    return f"https://meet.google.com/{meeting_code}"
+
+
+def send_physics_update(student_name, physics_update):
+    """Send a throttled physics snapshot without interrupting camera processing."""
+    try:
+        response = requests.post(
+            f"{BACKEND_URL}/classroom/physics/{student_name}",
+            json=physics_update,
+            timeout=2,
+        )
+        response.raise_for_status()
+
+    except requests.RequestException as error:
+        print(f"Physics update failed: {error}")
 
 
 # ============================================================
@@ -82,6 +126,9 @@ if not os.path.exists(POSE_MODEL_PATH):
 if "student_name" not in st.session_state:
     st.session_state.student_name = ""
 
+if "student_joined" not in st.session_state:
+    st.session_state.student_joined = False
+
 
 # ============================================================
 # SIDEBAR
@@ -99,6 +146,25 @@ with st.sidebar:
 
     st.session_state.student_name = student_name
 
+    if st.button("Join Classroom"):
+
+        if not student_name.strip():
+            st.error("Enter your student name before joining the classroom.")
+
+        else:
+            try:
+                response = requests.post(
+                    f"{BACKEND_URL}/classroom/students",
+                    json={"name": student_name.strip()},
+                    timeout=3,
+                )
+                response.raise_for_status()
+                st.session_state.student_joined = True
+                st.success("Joined the classroom successfully.")
+
+            except requests.RequestException as error:
+                st.error(f"Could not join the classroom: {error}")
+
     st.divider()
 
     st.subheader("Google Meet")
@@ -110,10 +176,19 @@ with st.sidebar:
 
     if meet_link:
 
-        st.link_button(
-            "🎥 Join Google Meet",
-            meet_link
-        )
+        normalized_meet_link = normalize_google_meet_url(meet_link)
+
+        if normalized_meet_link:
+            st.link_button(
+                "🎥 Join Google Meet",
+                normalized_meet_link
+            )
+
+        else:
+            st.error(
+                "Enter a valid Google Meet URL, for example "
+                "meet.google.com/abc-defg-hij."
+            )
 
     st.divider()
 
@@ -277,6 +352,12 @@ class VisionProcessor(VideoProcessorBase):
 
         self.frame_timestamp_ms = 0
 
+        # PhysicsEngine keeps the motion history between pose frames. Its
+        # combined result is sent at most five times per second.
+        self.physics_engine = PhysicsEngine()
+        self.last_physics_update_at = 0.0
+        self.latest_physics = None
+
 
     # ========================================================
     # PROCESS VIDEO FRAME
@@ -320,6 +401,33 @@ class VisionProcessor(VideoProcessorBase):
                 self.frame_timestamp_ms
             )
         )
+
+        # ====================================================
+        # PHYSICS METRICS
+        # ====================================================
+        # PhysicsEngine receives the MediaPipe pose landmarks directly and
+        # returns one combined angle/velocity/acceleration snapshot.
+        if pose_result.pose_landmarks:
+            pose = pose_result.pose_landmarks[0]
+            current_time = time.monotonic()
+
+            physics_result = self.physics_engine.process_landmarks(
+                pose,
+                current_time,
+            )
+
+            if physics_result:
+                self.latest_physics = {
+                    **physics_result,
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                }
+
+                if (
+                    current_time - self.last_physics_update_at
+                    >= PHYSICS_UPDATE_INTERVAL_SECONDS
+                ):
+                    send_physics_update(self.student_name, self.latest_physics)
+                    self.last_physics_update_at = current_time
 
 
         # ----------------------------------------------------
@@ -572,6 +680,44 @@ class VisionProcessor(VideoProcessorBase):
             2
         )
 
+        if self.latest_physics:
+            cv2.putText(
+                output,
+                f"Elbow: {self.latest_physics['elbow_angle']:.1f} deg",
+                (20, 200),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (255, 220, 0),
+                2
+            )
+            cv2.putText(
+                output,
+                f"Knee: {self.latest_physics['knee_angle']:.1f} deg",
+                (20, 230),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (255, 220, 0),
+                2
+            )
+            cv2.putText(
+                output,
+                f"Velocity: {self.latest_physics['velocity']:.3f}",
+                (20, 260),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (255, 220, 0),
+                2
+            )
+            cv2.putText(
+                output,
+                f"Acceleration: {self.latest_physics['acceleration']:.3f}",
+                (20, 290),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (255, 220, 0),
+                2
+            )
+
 
         # ----------------------------------------------------
         # RETURN FRAME
@@ -736,6 +882,53 @@ def show_latest_event():
 
 
 show_latest_event()
+
+
+# ============================================================
+# PHYSICS LAB
+# ============================================================
+
+st.divider()
+
+st.subheader("Physics Lab")
+
+
+@st.fragment(run_every="1s")
+def show_physics_lab():
+
+    if not student_name.strip():
+        st.info("Join the classroom to see your Physics Lab values.")
+        return
+
+    try:
+        response = requests.get(
+            f"{BACKEND_URL}/classroom/state",
+            timeout=2,
+        )
+        response.raise_for_status()
+        state = response.json()
+        physics = state.get("physics", {}).get(student_name, {})
+
+    except requests.RequestException:
+        st.info("Physics Lab is waiting for the classroom backend.")
+        return
+
+    if not physics:
+        st.info("Move in view of the camera to generate Physics Lab values.")
+        return
+
+    st.caption(
+        "Physics Lab is "
+        + ("active" if state.get("physics_lab_active") else "available")
+    )
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Elbow Angle", f"{physics.get('elbow_angle', 0):.1f}°")
+    col2.metric("Knee Angle", f"{physics.get('knee_angle', 0):.1f}°")
+    col3.metric("Velocity", f"{physics.get('velocity', 0):.3f}")
+    col4.metric("Acceleration", f"{physics.get('acceleration', 0):.3f}")
+
+
+show_physics_lab()
 
 
 # ============================================================

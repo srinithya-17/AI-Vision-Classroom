@@ -14,6 +14,11 @@ BACKEND_URL = os.getenv(
     "http://127.0.0.1:8000/events"
 )
 
+CLASSROOM_STATE_URL = os.getenv(
+    "CLASSROOM_STATE_URL",
+    "http://127.0.0.1:8000"
+)
+
 
 def save_event(student, event_type, value, confidence=None):
 
@@ -61,6 +66,35 @@ def save_event(student, event_type, value, confidence=None):
 
         print(
             f"Backend event send failed: {error}"
+        )
+
+    # Hand events are emitted by app.py only when the stable hand state
+    # changes. Mirror those transitions to shared classroom state without
+    # changing the existing latest_event.json or /events behavior.
+    if event_type == "HAND_RAISED":
+        _update_classroom_hand_state(student, "raise")
+
+    elif event_type == "HAND_DOWN":
+        _update_classroom_hand_state(student, "clear")
+
+
+def _update_classroom_hand_state(student, action):
+    """Best-effort sync of one hand-state transition to FastAPI."""
+    try:
+        response = requests.post(
+            f"{CLASSROOM_STATE_URL}/classroom/hand/{student}/{action}",
+            timeout=3
+        )
+        response.raise_for_status()
+
+        print(
+            f"Classroom hand state updated: {student} {action}"
+        )
+
+    except requests.RequestException as error:
+        # A temporary backend outage must not interrupt camera processing.
+        print(
+            f"Classroom hand state update failed: {error}"
         )
 
 
